@@ -15,7 +15,7 @@ Starting from vanilla HuggingFace `generate()`, the project measures how each op
 Models: `Qwen2.5-1.5B-Instruct` (dev), `Qwen2.5-7B-Instruct` (main), `Qwen2.5-3B-Instruct` (spec cross-check), `Qwen2.5-0.5B-Instruct` (draft).
 Prompts: 40 MT-Bench questions × 3 repeats, 256 new tokens, fixed length (EOS ignored), greedy.
 
-This is the experimental part of a master's thesis on inference optimization. Design rationale lives in [`EXPERIMENT_PLAN.md`](EXPERIMENT_PLAN.md), and running notes and conclusions in [`WORKLOG.md`](WORKLOG.md) (both in Russian).
+This is the experimental part of a master's thesis on inference optimization. See [Methodology](#methodology) for how numbers are measured and [Limitations](#limitations) for what they don't cover.
 
 ## Key findings
 
@@ -79,6 +79,23 @@ Full tables, including 1.5B and 3B: `results/<model>/summary_table.{csv,json}`.
 
 More plots, including Pareto fronts and spec variants: [`results/qwen7b/plots/`](results/qwen7b/plots/) · [`results/qwen1.5b/plots/`](results/qwen1.5b/plots/).
 
+## Methodology
+
+- **Workload.** The first turn of each MT-Bench question is formatted with the model's chat template. Speed runs use 40 questions × 3 repeats and greedy decoding. With `--fixed-length`, exactly 256 new tokens are generated (`min_new_tokens = max_new_tokens`, EOS ignored), so every config does identical work and batches have no ragged tails.
+- **Timing.** All timing uses `torch.cuda.Event`. A streamer records one event per emitted token, and the GPU is synchronized once at the end.
+  - **TTFT** is measured from the start of generation to the first token, so it includes prefill.
+  - **Decode tok/s** covers tokens 2…N only, so prefill doesn't dilute it.
+  - For speculative decoding, the streamer receives blocks of accepted tokens. Block size gives the acceptance rate.
+  - For batch > 1, decode throughput is aggregate: batch size × decode steps over decode time.
+- **Memory.** Peak VRAM is `torch.cuda.max_memory_allocated()`, reset before each generation.
+- **Isolation.** `run_matrix.py` runs each config in a fresh process, so peak memory and allocator state don't leak between configs.
+- **Statistics.** Each prompt's repeats are averaged first. The reported value is the mean across prompts, and `±` is the standard deviation across prompts. Run-to-run jitter is stored separately in each summary as `tokens_per_sec_jitter_mean`.
+- **Quality (7B).**
+  - Perplexity uses WikiText-2 test: the first 50k tokens, a 1024-token window with stride 512.
+  - MMLU and GSM8K are run with `lm-eval` 0.4.12: MMLU takes 10 questions per subject (570 total), and GSM8K takes the first 200 problems with strict match.
+  - Quality is a property of the weights, so it is measured once per format. Speed runs join it by (model, format).
+- **Provenance.** Every summary records the model, generation settings, git commit, and GPU temperature and clocks at the start and end of the run.
+
 ## Setup
 
 ```bash
@@ -127,8 +144,10 @@ python scripts/eval_quality.py --model Qwen/Qwen2.5-7B-Instruct --quant awq
 `run_matrix.py` runs every config in its own process, so each run gets a clean `max_memory_allocated()`. Then `aggregate.py` and `plots.py` build the tables and figures:
 
 ```bash
-bash scripts/run_all.sh            # 1.5B + 7B: speed, batch, quality → tables → plots
-bash scripts/run_marlin.sh         # re-measure AWQ/GPTQ on Marlin kernels (~35 min)
+bash scripts/launchers/run_all.sh          # 1.5B + 7B: speed, batch, quality → tables → plots
+bash scripts/launchers/run_night.sh        # length sweep, 3B spec, prompt-lookup
+bash scripts/launchers/run_batch_dense.sh  # extra batch sizes {2, 8, 32}
+bash scripts/launchers/run_marlin.sh       # re-measure AWQ/GPTQ on Marlin kernels (~35 min)
 
 python scripts/run_matrix.py --model Qwen/Qwen2.5-7B-Instruct --only baseline_cache spec --out-dir results/qwen7b
 python scripts/aggregate.py --results-dir results/qwen7b --out results/qwen7b/summary_table
@@ -136,7 +155,18 @@ python scripts/plots.py --results-dir results/qwen7b --out-dir results/qwen7b/pl
 python scripts/plots_methods.py --results-dir results/qwen7b --length-dir results/length_sweep/qwen7b
 ```
 
-Each run writes a per-prompt `<run_id>.jsonl` (gitignored) and a per-run summary `<run_id>.json` (committed). The summary includes mean ± std over repeats, generation settings, the git commit, and GPU temperature and clocks.
+Each run writes a per-prompt `<run_id>.jsonl` (gitignored) and a per-run summary `<run_id>.json` (committed).
+
+## Limitations
+
+- **HuggingFace `generate()` only.** vLLM, TensorRT-LLM and SGLang weren't tested. They are serving frameworks with PagedAttention, continuous batching and their own kernels, and they deliberately weren't used, so every method is compared through one code path. Absolute numbers will be lower than with a production engine.
+- **Speculative decoding results are specific to this setup.** Draft models don't pay off with HF on a 3090 for targets up to 7B. Learned draft heads (EAGLE, Medusa) on a production engine, or much larger targets, may well pay off. No public EAGLE head exists for Qwen2.5-7B-Instruct, so EAGLE wasn't measured.
+- **The 7B speculative run uses UAD.** The 0.5B draft has a different vocab size (151936 vs 152064), so 7B uses universal assisted decoding, which adds re-tokenization overhead. The 1.5B and 3B targets share a vocab with the draft and use vanilla assisted decoding.
+- **Hardware coverage is narrow.** Everything runs on one GPU (RTX 3090, Ampere SM 8.6) with one model family (Qwen2.5). Results depend on memory bandwidth and kernel support: FP8, for example, isn't accelerated on Ampere.
+- **Static batching only.** Prompts are left-padded to the batch; there is no continuous batching and no per-request latency under load.
+- **Quality has wide error bars.** Quality is measured on 7B only, on subsets. MMLU with 570 questions has a standard error of about ±1.8 points, so the 1–2 point drop for 4-bit is within noise. GSM8K with 200 problems has a standard error of about ±3 points.
+- **Quality is measured on the Triton path.** Marlin runs the same AWQ/GPTQ weights with a different kernel, so quality was measured once, not per kernel.
+- **Results are single-session.** Thermal and clock drift is logged but not controlled.
 
 ## Layout
 
@@ -153,12 +183,11 @@ scripts/
   run_matrix.py                  config-matrix driver, one process per config
   aggregate.py                   summary JSONs → summary_table.{csv,json}
   plots.py, plots_methods.py     figures
-  run_*.sh, resume_7b.sh         launchers for long runs
+  jsonl_to_summary.py            rebuild a summary JSON from per-prompt JSONL
   cli.py data.py modeling.py timing.py decode.py runner.py
   summary.py quality.py env.py plotstyle.py   shared helpers
+  launchers/                     shell scripts for the full / overnight runs
 results/
   qwen1.5b/ qwen3b/ qwen7b/      summary JSONs, summary_table, plots/
   length_sweep/                  KV-cache on/off at 128–1024 tokens
-EXPERIMENT_PLAN.md               experiment design (RU)
-WORKLOG.md                       progress log and conclusions (RU)
 ```

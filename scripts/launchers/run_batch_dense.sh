@@ -3,7 +3,7 @@
 # (existing runs already cover {1,4,16}), then re-aggregate + re-plot.
 # bf16 at batch=32 on 7B may OOM -> `|| true` keeps going; a missing point just
 # marks where that format hits the VRAM ceiling.
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 PY=.venv/bin/python
 for MT in "Qwen/Qwen2.5-1.5B-Instruct:qwen1.5b" "Qwen/Qwen2.5-7B-Instruct:qwen7b"; do
   model="${MT%%:*}"; tag="${MT##*:}"

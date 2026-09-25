@@ -4,7 +4,7 @@
 #   B2 vanilla speculative decoding on Qwen2.5-3B (vocab-matched 0.5B draft)
 #   B3 prompt-lookup (n-gram) decoding on 7B
 # Each step uses `|| true`; one failure never aborts the run.
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 PY=.venv/bin/python
 TIMEOUT=5400   # 90 min per cell safety net
 

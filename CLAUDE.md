@@ -1,172 +1,36 @@
 # llm-inference
 
-## Project goal
+Guidance for Claude Code when working in this repository.
 
-This is a personal LLM inference benchmarking project on a home RTX 3090 24GB machine.
+## What this is
 
-The goal is to build a small, reproducible benchmark harness for local LLM inference and then compare optimization techniques:
+A benchmark harness that measures LLM inference optimizations on a single RTX 3090 24GB with plain HuggingFace `generate()`: KV-cache, weight quantization (bitsandbytes, AWQ/GPTQ on Triton and Marlin), speculative decoding (draft model, prompt-lookup), and static batching. It also measures quality for the lossy formats (MMLU, GSM8K, perplexity).
 
-1. vanilla HuggingFace generation
-2. explicit/manual KV-cache understanding and measurement
-3. quantization
-4. speculative decoding
-5. later: EAGLE-style acceleration if practical
-
-The project is for learning, portfolio, and engineering depth. Prefer clear experiments over large abstractions.
+The experiments are complete. Results, methodology and limitations are in `README.md`. The repo is the experimental part of a master's thesis; the thesis text lives outside the repo (`thesis/` is gitignored).
 
 ## Environment
 
-Machine:
+- Runs on Linux / WSL2 with CUDA. torch 2.11.0+cu128, transformers 5.8.1, Python 3.11–3.12.
+- Package manager: `uv` (`uv sync`, then `source .venv/bin/activate`). Do not assume conda.
+- Dependency versions in `pyproject.toml` are pinned to the ones the published results were measured with. Don't bump them without re-measuring.
+- Marlin kernels need the CUDA toolkit: `export CUDA_HOME=/usr/local/cuda-12.8; export PATH=$CUDA_HOME/bin:$PATH`.
 
-- Windows host
-- WSL2 Ubuntu
-- GPU: NVIDIA GeForce RTX 3090, 24GB
-- CUDA works inside WSL
-- PyTorch sees GPU successfully
+## Code layout
 
-Current Python environment:
+- `scripts/` is flat on purpose. There is one script per method (`benchmark_*.py`, `manual_kv_loop.py`) plus small shared helpers: `cli.py`, `data.py`, `modeling.py`, `timing.py`, `runner.py`, `summary.py`, `quality.py`, `env.py`.
+- `run_matrix.py` runs each config in its own process. `aggregate.py` builds `summary_table.{csv,json}`, and `plots.py` / `plots_methods.py` draw the figures.
+- `scripts/launchers/*.sh` are the long-run entry points. They `cd` to the repo root themselves.
+- Results go to `results/<model>/`. The per-run summary `*.json` and the plots are committed; the per-prompt `*.jsonl` is gitignored.
 
-- project path: `~/code/llm-inference`
-- package manager: `uv`
-- venv: `.venv`
-- activate with: `source .venv/bin/activate`
-- PyTorch: `2.11.0+cu128`
-- CUDA available: true
-- device capability: `(8, 6)`
+## Conventions
 
-Do not assume conda. Use `uv pip install ...`.
+- Speed runs: `--limit 40 --repeats 3 --max-new-tokens 256 --fixed-length`, greedy.
+- Time with `torch.cuda.Event`, never wall-clock. Measure peak memory with `torch.cuda.max_memory_allocated()`.
+- New configs must not overwrite existing results. Use a new `kind` suffix, as `*_marlin` does.
+- Keep the style: simple, explicit functions and small files, with no frameworks or abstraction layers.
 
-## Current status
+## Ask first
 
-Already verified:
-
-- WSL Ubuntu works
-- `nvidia-smi` works inside WSL
-- PyTorch CUDA works
-- `Qwen/Qwen2.5-1.5B-Instruct` downloaded and ran successfully
-- observed peak VRAM for smoke test: about 2.93 GB
-
-Llama access:
-
-- `meta-llama/Llama-3.1-8B-Instruct` is gated
-- access request has been submitted
-- do not block work on Llama approval
-
-Claude Code is installed and connected.
-
-## Candidate models
-
-Use two model tiers:
-
-### Dev model
-
-`Qwen/Qwen2.5-1.5B-Instruct`
-
-Purpose:
-
-- fast iteration
-- debug benchmark harness
-- validate metrics
-- avoid long downloads
-
-### Main model later
-
-Prefer one of:
-
-- `Qwen/Qwen3-4B-Instruct`
-- `meta-llama/Llama-3.1-8B-Instruct` once access is approved
-
-Do not download very large models without asking first.
-
-## Benchmark dataset
-
-Primary dataset:
-
-- MT-Bench questions
-- expected path: `data/mt_bench/question.jsonl`
-- 80 multi-turn prompts
-- use initially for latency and throughput benchmarking, not quality judging
-
-Secondary dataset later:
-
-- HumanEval prompts only
-- do not execute generated code initially
-- use as a code-generation latency profile
-
-## First milestone
-
-Build a minimal baseline benchmark for HuggingFace generation.
-
-It should measure:
-
-- prompt tokens
-- generated tokens
-- TTFT if practical
-- total latency
-- tokens/sec
-- ms/token
-- peak VRAM
-- model name
-- dataset item id
-- category
-- generation settings
-
-Output results as JSONL or CSV under `results/`.
-
-Start simple. Do not introduce vLLM, EAGLE, Triton, custom CUDA, or complex abstractions yet.
-
-## Coding style
-
-Prefer:
-
-- simple Python
-- explicit functions
-- small files
-- readable benchmark code
-- reproducible CLI commands
-
-Avoid:
-
-- overengineering
-- hidden global state
-- big frameworks before baseline works
-- training anything before inference benchmark is stable
-
-## Suggested structure
-
-```text
-llm-inference/
-├── CLAUDE.md
-├── README.md
-├── pyproject.toml
-├── data/
-│   └── mt_bench/
-│       └── question.jsonl
-├── scripts/
-│   └── benchmark_baseline.py
-├── results/
-└── src/
-    └── llm_inference/
-```
-
-This structure is flexible. Keep it minimal.
-
-## First task for Claude
-
-Implement `scripts/benchmark_baseline.py`.
-
-Requirements:
-
-- load MT-Bench from `data/mt_bench/question.jsonl`
-- default model: `Qwen/Qwen2.5-1.5B-Instruct`
-- run only first N prompts by default, e.g. `--limit 5`
-- use chat template if tokenizer supports it
-- generate with `max_new_tokens=256`
-- default to greedy decoding for reproducibility
-- measure CUDA timings with `torch.cuda.Event`
-- record peak VRAM with `torch.cuda.max_memory_allocated`
-- write JSONL results to `results/baseline_<timestamp>.jsonl`
-- print aggregate summary at the end
-
-Ask before installing new heavy dependencies.
-Ask before downloading models larger than 5GB.
+- Before installing heavy dependencies.
+- Before downloading models larger than 5 GB.
+- Before re-running long experiments, which can take hours of GPU time.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Resume the 7B run after an interruption: skip the cells already on disk,
 # run the rest + the reduced no-cache, then aggregate + plot both models.
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 export HF_HUB_DISABLE_XET=1  # Xet stalled the GPTQ-Int4-7B download; use plain HTTPS
 PY=.venv/bin/python
 M7=Qwen/Qwen2.5-7B-Instruct

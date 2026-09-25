@@ -3,7 +3,7 @@
 # Quality is measured on 7B only (it is a property of the weights). no-cache on
 # 7B is run at reduced scope (quadratic baseline would otherwise take hours).
 # Each step uses `|| true` so a failed cell/step never aborts the whole run.
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 PY=.venv/bin/python
 M15=Qwen/Qwen2.5-1.5B-Instruct
 M7=Qwen/Qwen2.5-7B-Instruct

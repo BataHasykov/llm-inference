@@ -2,7 +2,7 @@
 # Re-measure 4-bit AWQ/GPTQ with the optimized Marlin kernels (needs the CUDA
 # toolkit installed at /usr/local/cuda-12.8). New *_marlin configs sit next to
 # the Triton ones; existing results are untouched.
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 export CUDA_HOME=/usr/local/cuda-12.8
 export PATH=/usr/local/cuda-12.8/bin:$PATH
 PY=.venv/bin/python
